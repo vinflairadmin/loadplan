@@ -2,9 +2,11 @@ import pandas as pd
 import streamlit as st
 
 
-# 1. 容錯版自動讀取與解析 Excel 貨物資料 Function
+# 1. 容錯與多關鍵字精準定位 Function
 def auto_load_cargo_data(uploaded_file):
     raw_df = pd.read_excel(uploaded_file, header=None)
+
+    # 必備核心關鍵字
     target_keywords = [
         'customer',
         'kgs',
@@ -17,17 +19,16 @@ def auto_load_cargo_data(uploaded_file):
 
     header_row_index = None
 
-    # 搜尋標題列 (Header Row)
+    # 搜尋標題列 (需命中 3 個或以上關鍵字以避開頂部 ULD 配額表)
     for idx, row in raw_df.iterrows():
-        # 強制將非空 cell 轉為小寫字串，避免 float / NaN 報錯
         row_cells = [str(c).lower() for c in row if pd.notna(c)]
-
         matches = sum(
             1
             for kw in target_keywords
             if any(kw in cell for cell in row_cells)
         )
-        if matches >= 2:
+
+        if matches >= 3:  # 提高門檻至 3 個關鍵字，專門匹配真正的貨物清單
             header_row_index = idx
             break
 
@@ -37,15 +38,27 @@ def auto_load_cargo_data(uploaded_file):
             " 等欄位。"
         )
 
-    # 擷取資料並清理 Column 名稱
+    # 擷取資料並處理欄位名稱重複問題
     headers = [
         str(h).strip() if pd.notna(h) else ""
         for h in raw_df.iloc[header_row_index].values
     ]
-    df = raw_df.iloc[header_row_index + 1 :].copy()
-    df.columns = headers
 
-    # 欄位自動對應 (Mapping)
+    # 避免重複欄位名報錯
+    seen = {}
+    unique_headers = []
+    for h in headers:
+        if h in seen:
+            seen[h] += 1
+            unique_headers.append(f"{h}_{seen[h]}")
+        else:
+            seen[h] = 0
+            unique_headers.append(h)
+
+    df = raw_df.iloc[header_row_index + 1 :].copy()
+    df.columns = unique_headers
+
+    # 欄位自動對應
     col_mapping = {}
     for col in df.columns:
         c_lower = str(col).lower()
@@ -64,7 +77,7 @@ def auto_load_cargo_data(uploaded_file):
 
     df = df.rename(columns=col_mapping)
 
-    # 轉為數字與過濾無效列
+    # 轉為數字類型
     if "Kgs" in df.columns:
         df["Kgs"] = pd.to_numeric(df["Kgs"], errors="coerce")
     if "Vol" in df.columns:
@@ -72,7 +85,7 @@ def auto_load_cargo_data(uploaded_file):
     if "No_of_Carton" in df.columns:
         df["No_of_Carton"] = pd.to_numeric(df["No_of_Carton"], errors="coerce")
 
-    # 過濾掉沒有數值的雜訊列
+    # 過濾有效數據列
     valid_cols = [c for c in ["Kgs", "Vol"] if c in df.columns]
     if valid_cols:
         df = df.dropna(subset=valid_cols)
@@ -80,7 +93,7 @@ def auto_load_cargo_data(uploaded_file):
     return df.reset_index(drop=True)
 
 
-# 2. Streamlit Web App 介面
+# 2. Streamlit 介面
 st.set_page_config(page_title="ULD 自動打板與配載系統", layout="wide")
 st.title("✈️ 航空貨運 ULD 自動打板系統")
 
