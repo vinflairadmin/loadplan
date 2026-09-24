@@ -227,7 +227,7 @@ def parse_uld_quotas_and_cargo(uploaded_file):
   cargo_df['Kgs'] = pd.to_numeric(cargo_df['Kgs'], errors='coerce')
   cargo_df['Vol'] = pd.to_numeric(cargo_df['Vol'], errors='coerce')
 
-  # 確保 No_of_Carton 轉為數值，防範小數點型態錯誤
+  # 確保 No_of_Carton 轉為數值，容許小數
   if 'No_of_Carton' in cargo_df.columns:
     cargo_df['No_of_Carton'] = pd.to_numeric(
         cargo_df['No_of_Carton'], errors='coerce'
@@ -239,7 +239,7 @@ def parse_uld_quotas_and_cargo(uploaded_file):
   return cargo_df, uld_slots
 
 
-# 3. 打板演算法：優先填滿 5J，留 RH 作為夜機 Buffer，修正小數點問題
+# 3. 打板演算法：優先填滿 5J，留 RH 作為夜機 Buffer
 def generate_uld_plan_v3(cargo_df, uld_slots):
   items = cargo_df.copy()
   items['Vol_Rem'] = items['Vol']
@@ -461,11 +461,16 @@ if uploaded_file:
 
     col1, col2, col3, col4 = st.columns(4)
     if 'No_of_Carton' in cargo_df.columns:
-      # 安全計算總件數（轉為數值後加總，無懼小數點）
       total_cartons = pd.to_numeric(
           cargo_df['No_of_Carton'], errors='coerce'
       ).sum()
-      col1.metric('總件數 (Cartons)', f'{total_cartons:,.2f} 件')
+      # 智能顯示件數：若是整數則顯示整數，有小數則保留 2 位
+      cartons_str = (
+          f'{int(round(total_cartons)):,}'
+          if abs(total_cartons - round(total_cartons)) < 0.01
+          else f'{total_cartons:,.2f}'
+      )
+      col1.metric('總件數 (Cartons)', f'{cartons_str} 件')
     col2.metric('總毛重 (Gross Weight)', f"{cargo_df['Kgs'].sum():,.2f} kg")
     col3.metric('總體積 (Total Vol)', f"{int(cargo_df['Vol'].sum()):,} Vol")
     col4.metric('總 ULD 板數配額', f'{len(uld_slots)} 塊/艙')
