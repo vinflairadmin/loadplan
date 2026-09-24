@@ -200,8 +200,11 @@ def parse_uld_quotas_and_cargo(uploaded_file):
       col_mapping[col] = 'Remarks'
 
   cargo_df = cargo_raw.rename(columns=col_mapping)
-  cargo_df['Kgs'] = pd.to_numeric(cargo_df['Kgs'], errors='coerce')
-  cargo_df['Vol'] = pd.to_numeric(cargo_df['Vol'], errors='coerce')
+  
+  # 【修復重點】加上 .astype(float) 強制轉換為浮點數，允許小數點運算，避免 dtype 'int64' 報錯
+  cargo_df['Kgs'] = pd.to_numeric(cargo_df['Kgs'], errors='coerce').astype(float)
+  cargo_df['Vol'] = pd.to_numeric(cargo_df['Vol'], errors='coerce').astype(float)
+  
   cargo_df = cargo_df.dropna(subset=['Vol', 'Kgs']).reset_index(drop=True)
   cargo_df = cargo_df[cargo_df['Vol'] > 0].reset_index(drop=True)
 
@@ -400,7 +403,7 @@ if uploaded_file:
     col1, col2, col3, col4 = st.columns(4)
     if 'No_of_Carton' in cargo_df.columns:
       col1.metric(
-          '總件數 (Cartons)', f"{int(cargo_df['No_of_Carton'].sum()):,} 件"
+          '總件數 (Cartons)', f"{int(pd.to_numeric(cargo_df['No_of_Carton'], errors='coerce').sum()):,} 件"
       )
     col2.metric('總毛重 (Gross Weight)', f"{cargo_df['Kgs'].sum():,.2f} kg")
     col3.metric('總體積 (Total Vol)', f"{int(cargo_df['Vol'].sum()):,} Vol")
