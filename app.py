@@ -208,7 +208,7 @@ def parse_uld_quotas_and_cargo(uploaded_file):
   return cargo_df, uld_slots
 
 
-# 3. 升級版雙重限制與早/夜機邏輯打板演算法
+# 3. 打板演算法：優先填滿 5J，留 RH 作為最終 Buffer
 def generate_uld_plan_v3(cargo_df, uld_slots):
   items = cargo_df.copy()
   items['Vol_Rem'] = items['Vol']
@@ -250,6 +250,7 @@ def generate_uld_plan_v3(cargo_df, uld_slots):
   mnl_tiktok_kg = 0.0
   MAX_TIKTOK_MNL_KG = 6000.0
 
+  # 【關鍵調整】5J_FALLBACK 移至 NIGHT_RH 之前，優先填滿 5J，留 RH 做為夜機 Buffer
   passes = [
       ('5J_ASSIGNED', pool_ulds['5J'], items[items['Target_Pool'] == '5J']),
       ('CX_ASSIGNED', pool_ulds['CX'], items[items['Target_Pool'] == 'CX']),
@@ -264,8 +265,8 @@ def generate_uld_plan_v3(cargo_df, uld_slots):
           items[(~items['Is_TikTok']) & (items['Target_Pool'] == 'CRK')],
       ),
       ('DAY_CX', pool_ulds['CX'], items[items['Vol_Rem'] > 0]),
-      ('NIGHT_RH', pool_ulds['RH'], items[items['Vol_Rem'] > 0]),
       ('5J_FALLBACK', pool_ulds['5J'], items[items['Vol_Rem'] > 0]),
+      ('NIGHT_RH', pool_ulds['RH'], items[items['Vol_Rem'] > 0]),
   ]
 
   for pass_name, available_slots, pool_items in passes:
