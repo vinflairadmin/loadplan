@@ -7,9 +7,9 @@ import streamlit as st
 st.set_page_config(page_title="✈️ 航空貨運 ULD 自動打板系統", layout="wide")
 
 
-# 2. 自動偵測表格位置與動態解析 (支援配額表在最頂部或最底部，以及有無 ETD 欄位)
+# 2. 自動偵測表格位置與動態解析 (強制以 dtype=object 讀取，杜絕 int64 轉型衝突)
 def parse_uld_quotas_and_cargo(uploaded_file):
-  raw_df = pd.read_excel(uploaded_file, header=None)
+  raw_df = pd.read_excel(uploaded_file, header=None, dtype=object)
 
   target_cargo_kw = [
       'customer',
@@ -82,7 +82,6 @@ def parse_uld_quotas_and_cargo(uploaded_file):
       'BULK': 500.0,
   }
 
-  # 動態讀取自訂 VOL 欄位 (Cols 10 & 11)
   for idx in range(1, len(quota_raw)):
     u_name = (
         str(quota_raw.iloc[idx, 10]).strip()
@@ -100,14 +99,12 @@ def parse_uld_quotas_and_cargo(uploaded_file):
       except Exception:
         pass
 
-  # 自動尋找 ETD 欄位位置（若存在）
   etd_col_idx = None
   for c_i, h_val in enumerate(q_header_row):
     if 'ETD' in h_val.upper():
       etd_col_idx = c_i
       break
 
-  # 動態掃瞄 ULD 配額欄位
   uld_slots = []
   for r_idx in range(1, len(quota_raw)):
     carrier = quota_raw.iloc[r_idx, 0]
@@ -126,7 +123,6 @@ def parse_uld_quotas_and_cargo(uploaded_file):
       if pd.notna(cell_etd):
         etd_str = str(cell_etd).strip()
 
-    # 判斷夜機 (ETD >= 20:00 或 RH 預設夜機)
     is_night = False
     if ':' in etd_str:
       try:
@@ -189,7 +185,6 @@ def parse_uld_quotas_and_cargo(uploaded_file):
         except ValueError:
           continue
 
-  # 解析貨物資料
   cargo_headers = [
       str(h).strip() if pd.notna(h) else ''
       for h in raw_df.iloc[cargo_header_idx].values
@@ -203,7 +198,7 @@ def parse_uld_quotas_and_cargo(uploaded_file):
     else:
       seen[h] = 0
       unique_headers.append(h)
-  cargo_raw.columns = unique_headers
+  cargo_raw.columns = unique_headers[: len(cargo_raw.columns)]
 
   col_mapping = {}
   for col in cargo_raw.columns:
@@ -224,15 +219,14 @@ def parse_uld_quotas_and_cargo(uploaded_file):
       col_mapping[col] = 'Remarks'
 
   cargo_df = cargo_raw.rename(columns=col_mapping)
-  
-  # 嚴格確保所有數值欄位均為 float 型態，杜絕任何 int64 轉型衝突
+
+  # 統一轉換為 float，防止整數轉型錯誤
   cargo_df['Kgs'] = pd.to_numeric(cargo_df['Kgs'], errors='coerce')
   cargo_df['Vol'] = pd.to_numeric(cargo_df['Vol'], errors='coerce')
-
   if 'No_of_Carton' in cargo_df.columns:
     cargo_df['No_of_Carton'] = pd.to_numeric(
         cargo_df['No_of_Carton'], errors='coerce'
-    ).astype(float)
+    )
 
   cargo_df = cargo_df.dropna(subset=['Vol', 'Kgs']).reset_index(drop=True)
   cargo_df = cargo_df[cargo_df['Vol'] > 0].reset_index(drop=True)
