@@ -1,4 +1,5 @@
 import io
+import os
 import pandas as pd
 import streamlit as st
 
@@ -133,7 +134,7 @@ def parse_uld_quotas_and_cargo(uploaded_file):
               max_v = vol_mapping.get(clean_type, 2000.0)
               max_k = kg_mapping.get(clean_type, 1800.0)
 
-              # 規則 2: BULK 散艙合埋一齊處理
+              # BULK 散艙合埋一齊處理
               if clean_type == 'BULK' and count_val > 1:
                 uld_slots.append({
                     'Carrier': carrier_str,
@@ -249,7 +250,6 @@ def generate_uld_plan_v3(cargo_df, uld_slots):
   mnl_tiktok_kg = 0.0
   MAX_TIKTOK_MNL_KG = 6000.0
 
-  # 優先把走 CRK 嘅 TIKTOK 排入早機 SR815 (日機必填滿，規則4)
   passes = [
       ('5J_ASSIGNED', pool_ulds['5J'], items[items['Target_Pool'] == '5J']),
       ('CX_ASSIGNED', pool_ulds['CX'], items[items['Target_Pool'] == 'CX']),
@@ -299,7 +299,6 @@ def generate_uld_plan_v3(cargo_df, uld_slots):
         vol_fit_by_kg = (avail_kg / density) if density > 0 else rem_vol
         max_possible_vol = min(rem_vol, avail_vol, vol_fit_by_kg)
 
-        # 規則 3: 超重/過大拆開配載
         if row['Is_Splittable']:
           fit_vol = max_possible_vol
         else:
@@ -331,7 +330,6 @@ def generate_uld_plan_v3(cargo_df, uld_slots):
         if rem_vol <= 0:
           break
 
-  # 格式化輸出結果 (規則 4: 早機不可預留 Buffer，夜機可預留)
   plan_rows = []
   for slot in uld_slots:
     used_v = slot['Used_Vol']
@@ -415,11 +413,15 @@ if uploaded_file:
     st.subheader('📦 最佳 ULD 打板配載方案結果 (ULD Load Plan)')
     result_df = generate_uld_plan_v3(cargo_df, uld_slots)
 
+    # 動態設定下載檔名：以上傳檔名為 Prefix + "_planned.xlsx"
+    base_name = os.path.splitext(uploaded_file.name)[0]
+    download_filename = f'{base_name}_planned.xlsx'
+
     excel_bytes = convert_df_to_excel(result_df)
     st.download_button(
         label='📥 一鍵下載打板結果 Excel (.xlsx)',
         data=excel_bytes,
-        file_name='ULD_Load_Plan_Result.xlsx',
+        file_name=download_filename,
         mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         type='primary',
     )
