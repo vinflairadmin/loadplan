@@ -26,13 +26,12 @@ def parse_uld_quotas_and_cargo(uploaded_file):
 
   for idx, row in raw_df.iterrows():
     row_cells = [str(c).strip().lower() for c in row if pd.notna(c)]
-
-    # 尋找貨物標題列
-    if cargo_header_idx is None:
-      if sum(1 for kw in target_cargo_kw if any(kw in cell for cell in row_cells)) >= 3:
-        cargo_header_idx = idx
-
-    # 尋找航司配額標題列 (識別 CARRIER 或 ULD 欄位)
+    if (
+        cargo_header_idx is None
+        and sum(1 for kw in target_cargo_kw if any(kw in cell for cell in row_cells))
+        >= 3
+    ):
+      cargo_header_idx = idx
     if carrier_header_idx is None:
       first_cell = (
           str(row.iloc[0]).strip().lower()
@@ -47,11 +46,9 @@ def parse_uld_quotas_and_cargo(uploaded_file):
         '⚠️ 找不到貨物資料標題列！請確保 Excel 包含 Customer, Kgs, Vol'
         ' 欄位。'
     )
-
   if carrier_header_idx is None:
     carrier_header_idx = 0 if cargo_header_idx > 0 else cargo_header_idx + 10
 
-  # 判斷配額表在「頂部」還是「底部」
   if cargo_header_idx < carrier_header_idx:
     cargo_raw = raw_df.iloc[cargo_header_idx + 1 : carrier_header_idx].copy()
     quota_raw = raw_df.iloc[carrier_header_idx:].copy()
@@ -59,7 +56,6 @@ def parse_uld_quotas_and_cargo(uploaded_file):
     quota_raw = raw_df.iloc[carrier_header_idx:cargo_header_idx].copy()
     cargo_raw = raw_df.iloc[cargo_header_idx + 1 :].copy()
 
-  # A. 解析航司 ULD 板數配額與容量
   q_header = [str(c).strip() for c in quota_raw.iloc[0].values]
 
   vol_mapping = {
@@ -104,6 +100,22 @@ def parse_uld_quotas_and_cargo(uploaded_file):
   uld_slots = []
   for r_idx in range(1, len(quota_raw)):
     carrier = quota_raw.iloc[r_idx, 0]
+    etd_str = (
+        str(quota_raw.iloc[r_idx, 1]).strip()
+        if quota_raw.shape[1] > 1 and pd.notna(quota_raw.iloc[r_idx, 1])
+        else ''
+    )
+
+    # 判斷是否為夜晚8點後 (ETD >= 20:00) 航班
+    is_night = False
+    if ':' in etd_str:
+      try:
+        hour = int(etd_str.split(':')[0])
+        if hour >= 20:
+          is_night = True
+      except Exception:
+        pass
+
     if (
         pd.notna(carrier)
         and str(carrier).strip() != ''
@@ -117,29 +129,42 @@ def parse_uld_quotas_and_cargo(uploaded_file):
             count_val = int(float(cnt))
             if count_val > 0:
               uld_type = q_header[c_idx]
-              clean_uld_type = uld_type.split('(')[0].strip()
-              max_v = vol_mapping.get(
-                  clean_uld_type, vol_mapping.get(uld_type, 2000.0)
-              )
-              max_k = kg_mapping.get(
-                  clean_uld_type, kg_mapping.get(uld_type, 1800.0)
-              )
+              clean_type = uld_type.split('(')[0].strip()
+              max_v = vol_mapping.get(clean_type, 2000.0)
+              max_k = kg_mapping.get(clean_type, 1800.0)
 
-              for i in range(1, count_val + 1):
+              # 規則 2: BULK 散艙合埋一齊處理
+              if clean_type == 'BULK' and count_val > 1:
                 uld_slots.append({
                     'Carrier': carrier_str,
-                    'ULD_ID': f'{carrier_str}-{clean_uld_type}-{i}',
-                    'ULD_Type': clean_uld_type,
-                    'Max_Vol': max_v,
-                    'Max_Kg': max_k,
+                    'ETD': etd_str,
+                    'Is_Night': is_night,
+                    'ULD_ID': f'{carrier_str}-BULK (共{count_val}艙)',
+                    'ULD_Type': 'BULK',
+                    'Max_Vol': max_v * count_val,
+                    'Max_Kg': max_k * count_val,
                     'Used_Vol': 0.0,
                     'Used_Kg': 0.0,
                     'Items': [],
                 })
+              else:
+                for i in range(1, count_val + 1):
+                  uld_slots.append({
+                      'Carrier': carrier_str,
+                      'ETD': etd_str,
+                      'Is_Night': is_night,
+                      'ULD_ID': f'{carrier_str}-{clean_type}-{i}',
+                      'ULD_Type': clean_type,
+                      'Max_Vol': max_v,
+                      'Max_Kg': max_k,
+                      'Used_Vol': 0.0,
+                      'Used_Kg': 0.0,
+                      'Items': [],
+                  })
           except ValueError:
             continue
 
-  # B. 解析貨物資料 (Cargo Table)
+  # 解析貨物資料
   cargo_headers = [
       str(h).strip() if pd.notna(h) else ''
       for h in raw_df.iloc[cargo_header_idx].values
@@ -173,22 +198,22 @@ def parse_uld_quotas_and_cargo(uploaded_file):
     elif 'remark' in c_lower:
       col_mapping[col] = 'Remarks'
 
-  df = cargo_raw.rename(columns=col_mapping)
-  df['Kgs'] = pd.to_numeric(df['Kgs'], errors='coerce')
-  df['Vol'] = pd.to_numeric(df['Vol'], errors='coerce')
-  cargo_df = df.dropna(subset=['Vol', 'Kgs']).reset_index(drop=True)
+  cargo_df = cargo_raw.rename(columns=col_mapping)
+  cargo_df['Kgs'] = pd.to_numeric(cargo_df['Kgs'], errors='coerce')
+  cargo_df['Vol'] = pd.to_numeric(cargo_df['Vol'], errors='coerce')
+  cargo_df = cargo_df.dropna(subset=['Vol', 'Kgs']).reset_index(drop=True)
   cargo_df = cargo_df[cargo_df['Vol'] > 0].reset_index(drop=True)
 
   return cargo_df, uld_slots
 
 
-# 3. 升級版雙重限制 (體積+重量) 打板演算法
-def generate_uld_plan_enhanced(cargo_df, uld_slots):
+# 3. 升級版雙重限制與早/夜機邏輯打板演算法
+def generate_uld_plan_v3(cargo_df, uld_slots):
   items = cargo_df.copy()
   items['Vol_Rem'] = items['Vol']
   items['Kgs_Rem'] = items['Kgs']
 
-  def classify_cargo(row):
+  def classify(row):
     c = str(row['Carrier']).strip() if pd.notna(row['Carrier']) else ''
     r = str(row['Remarks']).strip() if pd.notna(row['Remarks']) else ''
     cust = str(row['Customer']).strip() if pd.notna(row['Customer']) else ''
@@ -203,46 +228,47 @@ def generate_uld_plan_enhanced(cargo_df, uld_slots):
 
     is_splittable = not ('PLT' in r or '提貨' in r or '唔走得' in r)
     is_tiktok = 'TIKTOK' in cust.upper()
-
     return pd.Series([target, is_splittable, is_tiktok])
 
   items[['Target_Pool', 'Is_Splittable', 'Is_TikTok']] = items.apply(
-      classify_cargo, axis=1
+      classify, axis=1
   )
 
-  pool_ulds = {'5J': [], 'CRK': [], 'CX': [], 'RH': [], 'OTHER': []}
-  for slot in uld_slots:
-    carrier = slot['Carrier']
-    if '5J' in carrier:
-      pool_ulds['5J'].append(slot)
-    elif 'SR' in carrier or 'CRK' in carrier:
-      pool_ulds['CRK'].append(slot)
-    elif 'CX' in carrier:
-      pool_ulds['CX'].append(slot)
-    elif 'RH' in carrier:
-      pool_ulds['RH'].append(slot)
-    else:
-      pool_ulds['OTHER'].append(slot)
+  pool_ulds = {
+      '5J': [s for s in uld_slots if '5J' in s['Carrier']],
+      'CX': [s for s in uld_slots if 'CX' in s['Carrier']],
+      'SR815': [s for s in uld_slots if 'SR' in s['Carrier']],
+      'RH': [s for s in uld_slots if 'RH' in s['Carrier']],
+      'OTHER': [
+          s
+          for s in uld_slots
+          if not any(k in s['Carrier'] for k in ['5J', 'CX', 'SR', 'RH'])
+      ],
+  }
 
   mnl_tiktok_kg = 0.0
   MAX_TIKTOK_MNL_KG = 6000.0
 
+  # 優先把走 CRK 嘅 TIKTOK 排入早機 SR815 (日機必填滿，規則4)
   passes = [
-      ('5J', pool_ulds['5J']),
-      ('CX', pool_ulds['CX']),
-      ('CRK', pool_ulds['CRK']),
-      ('MAIN', pool_ulds['CX'] + pool_ulds['RH'] + pool_ulds['OTHER']),
-      ('CRK_FALLBACK', pool_ulds['RH'] + pool_ulds['5J'] + pool_ulds['OTHER']),
+      ('5J_ASSIGNED', pool_ulds['5J'], items[items['Target_Pool'] == '5J']),
+      ('CX_ASSIGNED', pool_ulds['CX'], items[items['Target_Pool'] == 'CX']),
+      (
+          'CRK_TIKTOK',
+          pool_ulds['SR815'],
+          items[(items['Is_TikTok']) & (items['Target_Pool'] == 'CRK')],
+      ),
+      (
+          'CRK_OTHER',
+          pool_ulds['SR815'],
+          items[(~items['Is_TikTok']) & (items['Target_Pool'] == 'CRK')],
+      ),
+      ('DAY_CX', pool_ulds['CX'], items[items['Vol_Rem'] > 0]),
+      ('NIGHT_RH', pool_ulds['RH'], items[items['Vol_Rem'] > 0]),
+      ('5J_FALLBACK', pool_ulds['5J'], items[items['Vol_Rem'] > 0]),
   ]
 
-  for pool_name, available_slots in passes:
-    if pool_name == 'CRK_FALLBACK':
-      pool_items = items[
-          (items['Target_Pool'] == 'CRK') & (items['Vol_Rem'] > 0)
-      ]
-    else:
-      pool_items = items[items['Target_Pool'] == pool_name]
-
+  for pass_name, available_slots, pool_items in passes:
     if pool_items.empty:
       continue
 
@@ -261,21 +287,19 @@ def generate_uld_plan_enhanced(cargo_df, uld_slots):
         if avail_vol <= 0 or avail_kg <= 0:
           continue
 
-        # 檢查 TIKTOK MNL 6,000 kg 限重條款
-        is_mnl_flight = any(
+        is_mnl = any(
             k in slot['Carrier'] for k in ['CX', 'RH', '5J']
         ) and ('CRK' not in slot['Carrier'])
-        if row['Is_TikTok'] and is_mnl_flight:
+        if row['Is_TikTok'] and is_mnl:
           if mnl_tiktok_kg >= MAX_TIKTOK_MNL_KG:
             continue
           else:
-            allowed_tiktok_kg = MAX_TIKTOK_MNL_KG - mnl_tiktok_kg
-            avail_kg = min(avail_kg, allowed_tiktok_kg)
+            avail_kg = min(avail_kg, MAX_TIKTOK_MNL_KG - mnl_tiktok_kg)
 
-        # 計算受體積與重量雙重限制之最大可行裝載量
         vol_fit_by_kg = (avail_kg / density) if density > 0 else rem_vol
         max_possible_vol = min(rem_vol, avail_vol, vol_fit_by_kg)
 
+        # 規則 3: 超重/過大拆開配載
         if row['Is_Splittable']:
           fit_vol = max_possible_vol
         else:
@@ -291,13 +315,12 @@ def generate_uld_plan_enhanced(cargo_df, uld_slots):
             (fit_vol / row['Vol']) * row['Kgs'] if row['Vol'] > 0 else 0.0
         )
 
-        # 鎖定扣減
         slot['Used_Vol'] += fit_vol
         slot['Used_Kg'] += ratio_kg
         items.at[idx, 'Vol_Rem'] -= fit_vol
         items.at[idx, 'Kgs_Rem'] -= ratio_kg
 
-        if row['Is_TikTok'] and is_mnl_flight:
+        if row['Is_TikTok'] and is_mnl:
           mnl_tiktok_kg += ratio_kg
 
         truck_str = f" {row['Truck']}" if pd.notna(row['Truck']) else ''
@@ -308,7 +331,7 @@ def generate_uld_plan_enhanced(cargo_df, uld_slots):
         if rem_vol <= 0:
           break
 
-  # 格式化輸出結果
+  # 格式化輸出結果 (規則 4: 早機不可預留 Buffer，夜機可預留)
   plan_rows = []
   for slot in uld_slots:
     used_v = slot['Used_Vol']
@@ -317,12 +340,18 @@ def generate_uld_plan_enhanced(cargo_df, uld_slots):
     max_k = slot['Max_Kg']
 
     util_v = round((used_v / max_v) * 100, 1) if max_v > 0 else 0.0
-    items_str = (
-        ' + '.join(slot['Items']) if slot['Items'] else '預留空板 (Buffer)'
-    )
+
+    if slot['Items']:
+      items_str = ' + '.join(slot['Items'])
+    else:
+      if slot['Is_Night']:
+        items_str = '預留空板 (Buffer - 夜機趕機預留)'
+      else:
+        items_str = '預留空板 (Buffer)'
 
     plan_rows.append({
         'Carrier': slot['Carrier'],
+        'ETD': slot['ETD'],
         'ULD 編號': slot['ULD_ID'],
         'ULD 類型': slot['ULD_Type'],
         '裝載體積 (Vol)': f'{int(used_v)} / {int(max_v)}',
@@ -336,13 +365,14 @@ def generate_uld_plan_enhanced(cargo_df, uld_slots):
     for idx, row in overflow_items.iterrows():
       plan_rows.append({
           'Carrier': '溢出未分配 (Overflow)',
+          'ETD': 'N/A',
           'ULD 編號': 'OVERFLOW',
           'ULD 類型': 'N/A',
           '裝載體積 (Vol)': f"{int(row['Vol_Rem'])} Vol",
           '裝載毛重 (kg)': f"{round(row['Kgs_Rem'], 2)} kg",
           '容量利用率': 'N/A',
           '裝載貨物組合': (
-              '⚠️ 航司配額全數用盡/單板重量上限限制，無法裝載:'
+              '⚠️ 航司配額全數用盡，無法裝載:'
               f" {row['Customer']} ({int(row['Vol_Rem'])} Vol)"
           ),
       })
@@ -383,7 +413,7 @@ if uploaded_file:
     st.divider()
 
     st.subheader('📦 最佳 ULD 打板配載方案結果 (ULD Load Plan)')
-    result_df = generate_uld_plan_enhanced(cargo_df, uld_slots)
+    result_df = generate_uld_plan_v3(cargo_df, uld_slots)
 
     excel_bytes = convert_df_to_excel(result_df)
     st.download_button(
