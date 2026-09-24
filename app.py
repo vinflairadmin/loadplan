@@ -224,14 +224,15 @@ def parse_uld_quotas_and_cargo(uploaded_file):
       col_mapping[col] = 'Remarks'
 
   cargo_df = cargo_raw.rename(columns=col_mapping)
+  
+  # 嚴格確保所有數值欄位均為 float 型態，杜絕任何 int64 轉型衝突
   cargo_df['Kgs'] = pd.to_numeric(cargo_df['Kgs'], errors='coerce')
   cargo_df['Vol'] = pd.to_numeric(cargo_df['Vol'], errors='coerce')
 
-  # 確保 No_of_Carton 轉為數值，容許小數
   if 'No_of_Carton' in cargo_df.columns:
     cargo_df['No_of_Carton'] = pd.to_numeric(
         cargo_df['No_of_Carton'], errors='coerce'
-    ).fillna(0)
+    ).astype(float)
 
   cargo_df = cargo_df.dropna(subset=['Vol', 'Kgs']).reset_index(drop=True)
   cargo_df = cargo_df[cargo_df['Vol'] > 0].reset_index(drop=True)
@@ -464,7 +465,6 @@ if uploaded_file:
       total_cartons = pd.to_numeric(
           cargo_df['No_of_Carton'], errors='coerce'
       ).sum()
-      # 智能顯示件數：若是整數則顯示整數，有小數則保留 2 位
       cartons_str = (
           f'{int(round(total_cartons)):,}'
           if abs(total_cartons - round(total_cartons)) < 0.01
@@ -483,7 +483,6 @@ if uploaded_file:
     st.subheader('📦 最佳 ULD 打板配載方案結果 (ULD Load Plan)')
     result_df = generate_uld_plan_v3(cargo_df, uld_slots)
 
-    # 動態設定下載檔名：以上傳檔名為 Prefix + "_planned.xlsx"
     base_name = os.path.splitext(uploaded_file.name)[0]
     download_filename = f'{base_name}_planned.xlsx'
 
