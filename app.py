@@ -226,6 +226,13 @@ def parse_uld_quotas_and_cargo(uploaded_file):
   cargo_df = cargo_raw.rename(columns=col_mapping)
   cargo_df['Kgs'] = pd.to_numeric(cargo_df['Kgs'], errors='coerce')
   cargo_df['Vol'] = pd.to_numeric(cargo_df['Vol'], errors='coerce')
+
+  # 確保 No_of_Carton 轉為數值，防範小數點型態錯誤
+  if 'No_of_Carton' in cargo_df.columns:
+    cargo_df['No_of_Carton'] = pd.to_numeric(
+        cargo_df['No_of_Carton'], errors='coerce'
+    ).fillna(0)
+
   cargo_df = cargo_df.dropna(subset=['Vol', 'Kgs']).reset_index(drop=True)
   cargo_df = cargo_df[cargo_df['Vol'] > 0].reset_index(drop=True)
 
@@ -274,7 +281,6 @@ def generate_uld_plan_v3(cargo_df, uld_slots):
   mnl_tiktok_kg = 0.0
   MAX_TIKTOK_MNL_KG = 6000.0
 
-  # 【調配優先順序】5J 優先填滿，RH 放在最後承接並留做 Buffer
   passes = [
       ('5J_ASSIGNED', pool_ulds['5J'], items[items['Target_Pool'] == '5J']),
       ('CX_ASSIGNED', pool_ulds['CX'], items[items['Target_Pool'] == 'CX']),
@@ -363,7 +369,6 @@ def generate_uld_plan_v3(cargo_df, uld_slots):
         if rem_vol <= 0.001:
           break
 
-  # 格式化輸出結果 (修復小數點問題)
   plan_rows = []
   for slot in uld_slots:
     used_v = round(slot['Used_Vol'], 2)
@@ -381,7 +386,6 @@ def generate_uld_plan_v3(cargo_df, uld_slots):
       else:
         items_str = '預留空板 (Buffer)'
 
-    # 清潔小數點顯示：整數顯示為整數，小數保留 2 位
     v_disp = (
         f'{int(round(used_v))}'
         if abs(used_v - round(used_v)) < 0.01
@@ -457,9 +461,11 @@ if uploaded_file:
 
     col1, col2, col3, col4 = st.columns(4)
     if 'No_of_Carton' in cargo_df.columns:
-      col1.metric(
-          '總件數 (Cartons)', f"{int(cargo_df['No_of_Carton'].sum()):,} 件"
-      )
+      # 安全計算總件數（轉為數值後加總，無懼小數點）
+      total_cartons = pd.to_numeric(
+          cargo_df['No_of_Carton'], errors='coerce'
+      ).sum()
+      col1.metric('總件數 (Cartons)', f'{total_cartons:,.2f} 件')
     col2.metric('總毛重 (Gross Weight)', f"{cargo_df['Kgs'].sum():,.2f} kg")
     col3.metric('總體積 (Total Vol)', f"{int(cargo_df['Vol'].sum()):,} Vol")
     col4.metric('總 ULD 板數配額', f'{len(uld_slots)} 塊/艙')
