@@ -101,13 +101,19 @@ def parse_uld_quotas_and_cargo(uploaded_file):
   uld_slots = []
   for r_idx in range(1, len(quota_raw)):
     carrier = quota_raw.iloc[r_idx, 0]
-    etd_str = (
-        str(quota_raw.iloc[r_idx, 1]).strip()
-        if quota_raw.shape[1] > 1 and pd.notna(quota_raw.iloc[r_idx, 1])
-        else ''
-    )
+    
+    # 1. 動態尋找 ETD 欄位 (支援有無 ETD 的表格)
+    etd_str = ''
+    for c_idx, h in enumerate(q_header):
+      if h.upper() == 'ETD':
+        etd_str = (
+            str(quota_raw.iloc[r_idx, c_idx]).strip()
+            if pd.notna(quota_raw.iloc[r_idx, c_idx])
+            else ''
+        )
+        break
 
-    # 判斷是否為夜晚8點後 (ETD >= 20:00) 航班
+    # 2. 判斷是否為夜晚8點後 (ETD >= 20:00) 航班
     is_night = False
     if ':' in etd_str:
       try:
@@ -121,9 +127,16 @@ def parse_uld_quotas_and_cargo(uploaded_file):
         pd.notna(carrier)
         and str(carrier).strip() != ''
         and str(carrier).strip().upper() != 'NAN'
+        and str(carrier).strip().upper() != 'CARRIER'
     ):
       carrier_str = str(carrier).strip()
-      for c_idx in range(2, min(10, len(q_header))):
+      
+      # 3. 動態掃描欄位 (由 Index 1 開始，自動跳過 ETD 及無關欄位)
+      for c_idx in range(1, min(10, len(q_header))):
+        header_name = q_header[c_idx].upper()
+        if header_name in ['ETD', 'NAN', 'VOL', 'REMARKS'] or header_name == '':
+          continue
+
         cnt = quota_raw.iloc[r_idx, c_idx]
         if pd.notna(cnt):
           try:
