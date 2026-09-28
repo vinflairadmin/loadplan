@@ -156,10 +156,14 @@ def parse_uld_quotas_and_cargo(uploaded_file):
     cargo_df['Kgs'] = pd.to_numeric(cargo_df['Kgs'], errors='coerce').astype(float)
     cargo_df['Vol'] = pd.to_numeric(cargo_df['Vol'], errors='coerce').astype(float)
     
+    # 【新增防呆機制】：如果重量漏填 (NaN)，自動補 0，等佢有得排板！
+    cargo_df['Kgs'] = cargo_df['Kgs'].fillna(0.0)
+    
     if 'No_of_Carton' in cargo_df.columns:
         cargo_df['No_of_Carton'] = pd.to_numeric(cargo_df['No_of_Carton'], errors='coerce').astype(float)
 
-    cargo_df = cargo_df.dropna(subset=['Vol', 'Kgs']).reset_index(drop=True)
+    # 新版：只檢查 Vol，只要有體積就俾佢過！
+    cargo_df = cargo_df.dropna(subset=['Vol']).reset_index(drop=True)
     cargo_df = cargo_df[cargo_df['Vol'] > 0].reset_index(drop=True)
     
     return cargo_df, uld_slots
