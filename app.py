@@ -346,6 +346,28 @@ if uploaded_file:
         # ------------------------------
 
         st.subheader('📦 最佳 ULD 打板配載方案結果')
+
+        # ==========================================
+        # 【新增】VIP 優先權排序邏輯（計分制）
+        # ==========================================
+        if 'Remarks' in cargo_df.columns:
+            remarks_text = cargo_df['Remarks'].fillna('').astype(str)
+            cargo_df['Priority'] = 0
+            
+            # 1分：普通 VIP
+            vip_keywords = '一定|指定|must|only'
+            cargo_df.loc[remarks_text.str.contains(vip_keywords, case=False, regex=True), 'Priority'] += 1
+            
+            # 2分：超級 VIP (寫明航班號)
+            super_vip_keywords = 'CX|RH|5J|MNL|CRK' 
+            cargo_df.loc[remarks_text.str.contains(super_vip_keywords, case=False, regex=True), 'Priority'] += 1
+            
+            # 重新排序
+            cargo_df = cargo_df.sort_values(by=['Priority'], ascending=[False], kind='stable').reset_index(drop=True)
+            cargo_df = cargo_df.drop(columns=['Priority'])
+        # ==========================================
+
+        # 系統開始排板 (原本嗰句)
         result_df = generate_uld_plan_v6(cargo_df, uld_slots)
 
         # 修正時間顯示，清走 1900-01-01
