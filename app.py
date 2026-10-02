@@ -348,9 +348,17 @@ if uploaded_file:
         st.subheader('📦 最佳 ULD 打板配載方案結果')
         result_df = generate_uld_plan_v6(cargo_df, uld_slots)
 
+        # 修正時間顯示，清走 1900-01-01
+        if 'ETD' in result_df.columns:
+            result_df['ETD'] = pd.to_datetime(result_df['ETD'].astype(str), errors='coerce').dt.strftime('%H:%M')
+
+        # 顯示 Dataframe 喺網頁度
+        st.dataframe(result_df)
+
+        # 準備 Excel 俾人 Download
         base_name = os.path.splitext(uploaded_file.name)[0]
         download_filename = f'{base_name}_planned.xlsx'
-
+        
         excel_bytes = convert_df_to_excel(result_df)
         st.download_button(
             label='📥 一鍵下載打板結果 Excel (.xlsx)',
@@ -360,10 +368,5 @@ if uploaded_file:
             type='primary',
         )
 
-        st.dataframe(result_df)
-
     except Exception as e:
-        st.error(f'解析檔案時出現錯誤：{e}')
-        # 修正時間顯示，清走 1900-01-01
-if 'ETD' in result_df.columns:
-    result_df['ETD'] = pd.to_datetime(result_df['ETD'].astype(str), errors='coerce').dt.strftime('%H:%M')
+        st.error(f'解析檔案時出現錯誤: {e}')
