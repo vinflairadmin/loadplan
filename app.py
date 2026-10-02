@@ -322,7 +322,7 @@ def convert_df_to_excel(df):
     return output.getvalue()
 
 # 5. UI 介面
-st.title('✈️ 航空貨運 ULD 自動打板系統')
+st.title('ULD LOADPLAN ASSISTANT')
 
 uploaded_file = st.file_uploader('上傳 Excel 檔案 (.xlsx)', type=['xlsx'])
 
@@ -364,3 +364,6 @@ if uploaded_file:
 
     except Exception as e:
         st.error(f'解析檔案時出現錯誤：{e}')
+        # 修正時間顯示，清走 1900-01-01
+if 'ETD' in result_df.columns:
+    result_df['ETD'] = pd.to_datetime(result_df['ETD'].astype(str), errors='coerce').dt.strftime('%H:%M')
