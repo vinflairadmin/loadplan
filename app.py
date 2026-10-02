@@ -354,13 +354,18 @@ if uploaded_file:
             remarks_text = cargo_df['Remarks'].fillna('').astype(str)
             cargo_df['Priority'] = 0
             
-            # 1分：普通 VIP
+            
+            # 1分：普通 VIP (一定要走)
             vip_keywords = '一定|指定|must|only'
             cargo_df.loc[remarks_text.str.contains(vip_keywords, case=False, regex=True), 'Priority'] += 1
             
-            # 2分：超級 VIP (寫明航班號)
-            super_vip_keywords = 'CX|RH|5J|MNL|CRK' 
-            cargo_df.loc[remarks_text.str.contains(super_vip_keywords, case=False, regex=True), 'Priority'] += 1
+            # 5分：指定機場目的地 (CRK / MNL)
+            airport_keywords = 'MNL|CRK'
+            cargo_df.loc[remarks_text.str.contains(airport_keywords, case=False, regex=True), 'Priority'] += 5
+            
+            # 100分：超級 VIP (寫明航班號例如 CX901)
+            flight_keywords = 'CX|RH|5J' 
+            cargo_df.loc[remarks_text.str.contains(flight_keywords, case=False, regex=True), 'Priority'] += 100
             
             # 重新排序
             cargo_df = cargo_df.sort_values(by=['Priority'], ascending=[False], kind='stable').reset_index(drop=True)
